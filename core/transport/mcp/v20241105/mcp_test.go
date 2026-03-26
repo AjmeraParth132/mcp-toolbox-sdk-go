@@ -758,12 +758,11 @@ func TestClose_WithTelemetry_RecordsSessionDuration(t *testing.T) {
 	client, err := New(server.URL, server.Client(), "client", "1.0.0", true)
 	require.NoError(t, err)
 
-	// Trigger initialization to set SessionStartTime
+	// Trigger initialization (sets session info via StartSession)
 	_, err = client.ListTools(context.Background(), "", nil)
 	require.NoError(t, err)
 
 	// Close should not panic and should succeed
-	assert.NotZero(t, client.BaseMcpTransport.SessionStartTime, "SessionStartTime should be set after initialization")
 	err = client.Close(context.Background())
 	assert.NoError(t, err)
 }

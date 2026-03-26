@@ -36,14 +36,20 @@ type ToolContent struct {
 	Text string `json:"text"`
 }
 
+// sessionInfo holds state that is known only after the MCP handshake completes.
+type sessionInfo struct {
+	startTime       time.Time
+	protocolVersion string
+}
+
 // BaseMcpTransport holds the common state and logic for MCP HTTP transports.
 type BaseMcpTransport struct {
-	baseURL         string
-	ProtocolVersion string
-	HTTPClient      *http.Client
-	ServerVersion   string
-	initOnce        sync.Once
-	initErr         error
+	baseURL       string
+	HTTPClient    *http.Client
+	ServerVersion string
+	initOnce      sync.Once
+	initErr       error
+	session       sessionInfo
 
 	// HandshakeHook is the abstract method _initialize_session.
 	// The specific version implementation will assign this function.
@@ -54,9 +60,6 @@ type BaseMcpTransport struct {
 	Tracer                     trace.Tracer
 	OperationDurationHistogram metric.Float64Histogram
 	SessionDurationHistogram   metric.Float64Histogram
-
-	// SessionStartTime records when the session was initialized, for session duration metric.
-	SessionStartTime time.Time
 }
 
 // BaseURL returns the base URL for the transport.
@@ -117,12 +120,19 @@ func (b *BaseMcpTransport) EnsureInitialized(ctx context.Context, headers map[st
 	return b.initErr
 }
 
+// StartSession records the protocol version and session start time after the
+// MCP handshake completes. It should be called once per session from within
+// initializeSession when telemetry is enabled.
+func (b *BaseMcpTransport) StartSession(protocolVersion string) {
+	b.session = sessionInfo{startTime: time.Now(), protocolVersion: protocolVersion}
+}
+
 // Close records the session duration metric (if telemetry is enabled) and
 // releases any resources held by the transport.
 func (b *BaseMcpTransport) Close(ctx context.Context) error {
-	if b.TelemetryEnabled && !b.SessionStartTime.IsZero() {
-		duration := time.Since(b.SessionStartTime).Seconds()
-		RecordSessionDuration(ctx, b.SessionDurationHistogram, duration, b.ProtocolVersion, b.baseURL, nil)
+	if b.TelemetryEnabled && !b.session.startTime.IsZero() {
+		duration := time.Since(b.session.startTime).Seconds()
+		RecordSessionDuration(ctx, b.SessionDurationHistogram, duration, b.session.protocolVersion, b.baseURL, nil)
 	}
 	return nil
 }

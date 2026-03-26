@@ -61,7 +61,6 @@ func New(baseURL string, client *http.Client, clientName string, clientVersion s
 		clientName:       clientName,
 		clientVersion:    clientVersion,
 	}
-	t.BaseMcpTransport.ProtocolVersion = ProtocolVersion
 	t.HandshakeHook = t.initializeSession
 
 	return t, nil
@@ -212,7 +211,7 @@ func (t *McpTransport) initializeSession(ctx context.Context, headers map[string
 	// record the operation duration metric and end the span.
 	var traceparent, tracestate string
 	if t.TelemetryEnabled {
-		t.SessionStartTime = time.Now()
+		t.StartSession(ProtocolVersion)
 		var span mcp.SpanRef
 		operationStart := time.Now()
 		span, traceparent, tracestate = mcp.StartSpan(ctx, t.Tracer, "initialize", t.protocolVersion, t.BaseURL(), "")

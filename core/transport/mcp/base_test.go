@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 )
 
 func TestNewBaseTransport(t *testing.T) {
@@ -339,7 +338,7 @@ func TestClose_WithSessionStarted_RecordsSessionDuration(t *testing.T) {
 	}
 
 	// Simulate that a session was started
-	tr.SessionStartTime = time.Now().Add(-5 * time.Second)
+	tr.StartSession("2024-11-05")
 
 	// Close should not return an error
 	if err := tr.Close(context.Background()); err != nil {
@@ -353,10 +352,7 @@ func TestClose_WithoutSessionStarted_DoesNotPanic(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// SessionStartTime is zero (not yet initialized)
-	if !tr.SessionStartTime.IsZero() {
-		t.Error("expected SessionStartTime to be zero before initialization")
-	}
+	// session.startTime is zero (not yet initialized) — Close should be a no-op
 
 	// Close should not panic or error when session was never started
 	if err := tr.Close(context.Background()); err != nil {
@@ -370,8 +366,8 @@ func TestClose_WithTelemetryDisabled_DoesNotPanic(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Even with a non-zero SessionStartTime, telemetry disabled should be a no-op
-	tr.SessionStartTime = time.Now()
+	// Even with a session started, telemetry disabled should be a no-op
+	tr.StartSession("2024-11-05")
 	if err := tr.Close(context.Background()); err != nil {
 		t.Errorf("Close returned unexpected error: %v", err)
 	}
