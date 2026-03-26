@@ -68,8 +68,6 @@ func (b *BaseMcpTransport) BaseURL() string {
 }
 
 // NewBaseTransport creates a new base transport.
-// Pass telemetryEnabled=true to initialise OTel tracer and histogram instruments
-// from the globally configured providers (see WithTelemetry client option).
 func NewBaseTransport(baseURL string, client *http.Client, telemetryEnabled bool) (*BaseMcpTransport, error) {
 	if client == nil {
 		client = &http.Client{}

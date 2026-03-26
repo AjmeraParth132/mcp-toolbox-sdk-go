@@ -28,6 +28,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // capturedRequest holds both the RPC body and the HTTP headers for verification
@@ -675,4 +678,152 @@ func TestNew_ClientVersion(t *testing.T) {
 			t.Errorf("expected clientVersion %q, got %q", mcp.SDKVersion, tr2.clientVersion)
 		}
 	})
+}
+
+// --------------------------------------------------------------------------
+// Telemetry integration tests
+// --------------------------------------------------------------------------
+
+// setupRealTracerProvider installs a real in-memory TracerProvider as the
+// global provider for the duration of a test, then restores the previous one.
+func setupRealTracerProvider(t *testing.T) *tracetest.InMemoryExporter {
+	t.Helper()
+	exp := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+	return exp
+}
+
+func TestListTools_WithTelemetry_PropagatesTraceparent(t *testing.T) {
+	setupRealTracerProvider(t)
+
+	server := newMockMCPServer(t)
+	defer server.Close()
+
+	server.handlers["tools/list"] = func(params json.RawMessage) (any, error) {
+		return listToolsResult{Tools: []mcpTool{}}, nil
+	}
+
+	client, err := New(server.URL, server.Client(), "client", "1.0.0", true)
+	require.NoError(t, err)
+
+	_, err = client.ListTools(context.Background(), "", nil)
+	require.NoError(t, err)
+
+	var toolsListReq *jsonRPCRequest
+	for i, r := range server.requests {
+		if r.Body.Method == "tools/list" {
+			toolsListReq = &server.requests[i].Body
+			break
+		}
+	}
+	require.NotNil(t, toolsListReq, "expected tools/list request to be captured")
+
+	paramsBytes, err := json.Marshal(toolsListReq.Params)
+	require.NoError(t, err)
+
+	var params listToolsRequestParams
+	require.NoError(t, json.Unmarshal(paramsBytes, &params))
+
+	assert.NotNil(t, params.Meta, "expected _meta to be set when telemetry is enabled")
+	if params.Meta != nil {
+		assert.NotEmpty(t, params.Meta.Traceparent, "expected traceparent to be set in _meta")
+	}
+}
+
+func TestInvokeTool_WithTelemetry_PropagatesTraceparent(t *testing.T) {
+	setupRealTracerProvider(t)
+
+	server := newMockMCPServer(t)
+	defer server.Close()
+
+	server.handlers["tools/call"] = func(params json.RawMessage) (any, error) {
+		return callToolResult{
+			Content: []textContent{{Type: "text", Text: "ok"}},
+		}, nil
+	}
+
+	client, err := New(server.URL, server.Client(), "client", "1.0.0", true)
+	require.NoError(t, err)
+
+	_, err = client.InvokeTool(context.Background(), "my_tool", nil, nil)
+	require.NoError(t, err)
+
+	var callReq *jsonRPCRequest
+	for i, r := range server.requests {
+		if r.Body.Method == "tools/call" {
+			callReq = &server.requests[i].Body
+			break
+		}
+	}
+	require.NotNil(t, callReq, "expected tools/call request to be captured")
+
+	paramsBytes, err := json.Marshal(callReq.Params)
+	require.NoError(t, err)
+
+	var params callToolRequestParams
+	require.NoError(t, json.Unmarshal(paramsBytes, &params))
+
+	assert.NotNil(t, params.Meta, "expected _meta to be set when telemetry is enabled")
+	if params.Meta != nil {
+		assert.NotEmpty(t, params.Meta.Traceparent, "expected traceparent to be set in _meta")
+	}
+}
+
+func TestInitializeSession_WithTelemetry_PropagatesTraceparent(t *testing.T) {
+	setupRealTracerProvider(t)
+
+	server := newMockMCPServer(t)
+	defer server.Close()
+
+	client, err := New(server.URL, server.Client(), "client", "1.0.0", true)
+	require.NoError(t, err)
+
+	server.handlers["tools/list"] = func(params json.RawMessage) (any, error) {
+		return listToolsResult{Tools: []mcpTool{}}, nil
+	}
+	_, err = client.ListTools(context.Background(), "", nil)
+	require.NoError(t, err)
+
+	var initReq *jsonRPCRequest
+	for i, r := range server.requests {
+		if r.Body.Method == "initialize" {
+			initReq = &server.requests[i].Body
+			break
+		}
+	}
+	require.NotNil(t, initReq, "expected initialize request to be captured")
+
+	paramsBytes, err := json.Marshal(initReq.Params)
+	require.NoError(t, err)
+
+	var params initializeRequestParams
+	require.NoError(t, json.Unmarshal(paramsBytes, &params))
+
+	assert.NotNil(t, params.Meta, "expected _meta to be set when telemetry is enabled")
+	if params.Meta != nil {
+		assert.NotEmpty(t, params.Meta.Traceparent, "expected traceparent to be set in _meta")
+	}
+}
+
+func TestClose_WithTelemetry_RecordsSessionDuration(t *testing.T) {
+	setupRealTracerProvider(t)
+
+	server := newMockMCPServer(t)
+	defer server.Close()
+
+	server.handlers["tools/list"] = func(params json.RawMessage) (any, error) {
+		return listToolsResult{Tools: []mcpTool{}}, nil
+	}
+
+	client, err := New(server.URL, server.Client(), "client", "1.0.0", true)
+	require.NoError(t, err)
+
+	_, err = client.ListTools(context.Background(), "", nil)
+	require.NoError(t, err)
+
+	err = client.Close(context.Background())
+	assert.NoError(t, err)
 }
