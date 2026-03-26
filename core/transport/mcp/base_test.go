@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestNewBaseTransport(t *testing.T) {
@@ -57,7 +58,7 @@ func TestNewBaseTransport(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tr, _ := NewBaseTransport(tc.baseURL, nil)
+			tr, _ := NewBaseTransport(tc.baseURL, nil, false)
 			if tr.BaseURL() != tc.expected {
 				t.Errorf("Expected URL %s, got %s", tc.expected, tr.BaseURL())
 			}
@@ -70,7 +71,7 @@ func TestNewBaseTransport(t *testing.T) {
 
 func TestEnsureInitialized(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
-		tr, _ := NewBaseTransport("http://example.com", nil)
+		tr, _ := NewBaseTransport("http://example.com", nil, false)
 		called := 0
 
 		testHeaders := map[string]string{"Authorization": "Bearer test"}
@@ -100,7 +101,7 @@ func TestEnsureInitialized(t *testing.T) {
 	})
 
 	t.Run("Failure", func(t *testing.T) {
-		tr, _ := NewBaseTransport("http://example.com", nil)
+		tr, _ := NewBaseTransport("http://example.com", nil, false)
 		expectedErr := errors.New("handshake failed")
 		tr.HandshakeHook = func(ctx context.Context, headers map[string]string) error {
 			return expectedErr
@@ -117,7 +118,7 @@ func TestEnsureInitialized(t *testing.T) {
 	})
 
 	t.Run("MissingHook", func(t *testing.T) {
-		tr, _ := NewBaseTransport("http://example.com", nil)
+		tr, _ := NewBaseTransport("http://example.com", nil, false)
 		// No hook defined
 		err := tr.EnsureInitialized(context.Background(), nil)
 		if err == nil {
@@ -127,7 +128,7 @@ func TestEnsureInitialized(t *testing.T) {
 }
 
 func TestConvertToolDefinition(t *testing.T) {
-	tr, _ := NewBaseTransport("http://example.com", nil)
+	tr, _ := NewBaseTransport("http://example.com", nil, false)
 
 	rawTool := map[string]any{
 		"name":        "complex_tool",
@@ -254,7 +255,7 @@ func TestConvertToolDefinition(t *testing.T) {
 }
 func TestProcessToolResultContent(t *testing.T) {
 	// Setup a dummy transport (ProcessToolResultContent is a pure function, so state doesn't matter)
-	tr, _ := NewBaseTransport("http://example.com", nil)
+	tr, _ := NewBaseTransport("http://example.com", nil, false)
 
 	tests := []struct {
 		name     string
@@ -324,5 +325,54 @@ func TestProcessToolResultContent(t *testing.T) {
 				t.Errorf("\nExpected: %s\nGot:      %s", tc.expected, result)
 			}
 		})
+	}
+}
+
+// --------------------------------------------------------------------------
+// Close
+// --------------------------------------------------------------------------
+
+func TestClose_WithSessionStarted_RecordsSessionDuration(t *testing.T) {
+	tr, err := NewBaseTransport("http://example.com", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Simulate that a session was started
+	tr.SessionStartTime = time.Now().Add(-5 * time.Second)
+
+	// Close should not return an error
+	if err := tr.Close(context.Background()); err != nil {
+		t.Errorf("Close returned unexpected error: %v", err)
+	}
+}
+
+func TestClose_WithoutSessionStarted_DoesNotPanic(t *testing.T) {
+	tr, err := NewBaseTransport("http://example.com", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// SessionStartTime is zero (not yet initialized)
+	if !tr.SessionStartTime.IsZero() {
+		t.Error("expected SessionStartTime to be zero before initialization")
+	}
+
+	// Close should not panic or error when session was never started
+	if err := tr.Close(context.Background()); err != nil {
+		t.Errorf("Close returned unexpected error: %v", err)
+	}
+}
+
+func TestClose_WithTelemetryDisabled_DoesNotPanic(t *testing.T) {
+	tr, err := NewBaseTransport("http://example.com", nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Even with a non-zero SessionStartTime, telemetry disabled should be a no-op
+	tr.SessionStartTime = time.Now()
+	if err := tr.Close(context.Background()); err != nil {
+		t.Errorf("Close returned unexpected error: %v", err)
 	}
 }
